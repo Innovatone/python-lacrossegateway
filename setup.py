@@ -6,7 +6,7 @@ import os
 import re
 import subprocess
 
-name = 'pylacrosse'
+name = 'pylacrossegateway'
 version_py = os.path.join(os.path.dirname(__file__), name, 'version.py')
 try:
     version = subprocess.check_output(
@@ -34,7 +34,7 @@ setup(name = name,
         author = 'Heiko Thiery',
         author_email = 'heiko.thiery@gmail.com',
         packages = find_packages(),
-        url = 'http://github.com/hthiery/python-lacrosse',
+        url = 'https://github.com/Innovatone/python-lacrossegateway',
         license = 'LGPLv2+',
         classifiers = [
             'Development Status :: 3 - Alpha',

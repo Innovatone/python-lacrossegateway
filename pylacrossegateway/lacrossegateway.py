@@ -57,7 +57,7 @@ class LaCrosseGateway(object):
         self._port = port
         self._callback_data = None
 
-    def connect(self):
+    def open(self):
         """Connect to the device."""
         self._socket = socket.socket()
         self._socket.connect((self._host, self._port))
@@ -196,7 +196,7 @@ class LaCrosseGateway(object):
                 line = line.decode('utf-8').strip('\r\n')
 
             if LaCrosseSensor.re_reading.match(line):
-                sensor = LaCrosseSensor(line)
+                sensor = LaCrosseGatewaySensor(line)
                 self.sensors[sensor.sensorid] = sensor
 
                 if self._callback:
@@ -218,7 +218,7 @@ class LaCrosseGateway(object):
         self._callback_data = user_data
 
 
-class LaCrosseSensor(object):
+class LaCrosseGatewaySensor(object):
     """The LaCrosse Sensor class."""
     # OK 9 248 1 4 150 106
     # OK 22 121 49 3 222 240 0 1 82 87 121 0 4 148 225 0 0 38 229 1 0 [79 31 F0 00 00 00 57 79 00 00 00 00 6D A7 08 00 00 26 E5 00 08 40 09 A9 00 9D 40 0C 7D 3D E0 00 00 00 04 15 20 10 02 EF 17]

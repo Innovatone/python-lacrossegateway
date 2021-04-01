@@ -149,7 +149,7 @@ def main(args=None):
     lacrossegateway = None
     try:
         lacrossegateway = pylacrossegateway.LaCrosseGateway(args.host, args.port)
-        lacrossegateway.connect()
+        lacrossegateway.open()
         configure(lacrossegateway, config, args)
         try:
             func = args.func

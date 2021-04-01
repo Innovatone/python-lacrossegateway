@@ -29,7 +29,7 @@ with open('README.rst') as f:
 
 setup(name = name,
         version = version,
-        description = 'LaCrosse sensor library',
+        description = 'LaCrosseGateway sensor library',
         long_description = readme,
         author = 'Heiko Thiery',
         author_email = 'heiko.thiery@gmail.com',
@@ -52,10 +52,9 @@ setup(name = name,
         ],
         entry_points = {
             'console_scripts': [
-                'pylacrosse= pylacrosse.cli_tool:main',
+                'pylacrossegateway= pylacrossegateway.cli_tool:main',
             ]
         },
         test_suite = 'tests',
         include_package_data = True,
-        install_requires=['pyserial'],
 )

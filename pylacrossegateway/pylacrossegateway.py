@@ -1,4 +1,5 @@
 # Copyright (c) 2017 Heiko Thiery
+# Copyright (c) 2021 Oliver Novakovic
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -19,11 +20,12 @@ from __future__ import unicode_literals
 import logging
 import re
 import threading
+import socket
 
 _LOGGER = logging.getLogger(__name__)
 
 """
-    Jeelink lacrosse firmware commands
+    Jeelink lacrossegateway firmware commands
     <n>a     set to 0 if the blue LED bothers
     <n>f     initial frequency in kHz (5 kHz steps, 860480 ... 879515)  (for RFM
     #1)
@@ -40,44 +42,38 @@ _LOGGER = logging.getLogger(__name__)
        <n>y     if 1 all received packets will be retransmitted  (Relay mode)
 """
 
-class LaCrosse(object):
+class LaCrosseGateway(object):
 
     sensors = {}
     _registry = {}
     _callback = None
-    _serial = None
+    _socket = None
     _stopevent = None
     _thread = None
 
-    def __init__(self, port, baud, timeout=2):
-        """Initialize the Lacrosse device."""
+    def __init__(self, host, port):
+        """Initialize the LacrosseGateway device."""
+        self._host = host
         self._port = port
-        self._baud = baud
-        self._timeout = timeout
-        self._serial = SerialPortFactory().create_serial_port(port)
         self._callback_data = None
 
-    def open(self):
-        """Open the device."""
-        self._serial.port = self._port
-        self._serial.baudrate = self._baud
-        self._serial.timeout = self._timeout
-        self._serial.open()
-        self._serial.flushInput()
-        self._serial.flushOutput()
+    def connect(self):
+        """Connect to the device."""
+        self._socket = socket.socket()
+        self._socket.connect((self._host, self._port))
 
     def close(self):
         """Close the device."""
         self._stop_worker()
-        self._serial.close()
+        self._socket.close()
 
     def start_scan(self):
         """Start scan task in background."""
         self._start_worker()
 
     def _write_cmd(self, cmd):
-        """Write a cmd."""
-        self._serial.write(cmd.encode())
+        """Write to socket."""
+        self._socket.sendall((cmd + '\r\n').encode())
 
     @staticmethod
     def _parse_info(line):
@@ -85,15 +81,17 @@ class LaCrosse(object):
         The output can be:
         - [LaCrosseITPlusReader.10.1s (RFM12B f:0 r:17241)]
         - [LaCrosseITPlusReader.10.1s (RFM12B f:0 t:10~3)]
+        - [LaCrosseITPlusReader.Gateway.1.35 (1=RFM69 f:868300 r:8) {IP=192.168.178.40}]
         """
         re_info = re.compile(
-            r'\[(?P<name>\w+).(?P<ver>.*) ' +
-            r'\((?P<rfm1name>\w+) (\w+):(?P<rfm1freq>\d+) ' +
-            r'(?P<rfm1mode>.*)\)\]')
+            r'\[(?P<name>\w+\.\w+).(?P<ver>.*) ' +
+            r'\(1=(?P<rfm1name>\w+) (\w+):(?P<rfm1freq>\d+) ' +
+            r'(?P<rfm1mode>.*)\) {IP=(?P<address>.*)}\]')
 
         info = {
             'name': None,
             'version': None,
+            'address': None,
             'rfm1name': None,
             'rfm1frequency': None,
             'rfm1datarate': None,
@@ -104,6 +102,7 @@ class LaCrosse(object):
         if match:
             info['name'] = match.group('name')
             info['version'] = match.group('ver')
+            info['address'] = match.group('address')
             info['rfm1name'] = match.group('rfm1name')
             info['rfm1frequency'] = match.group('rfm1freq')
             values = match.group('rfm1mode').split(':')
@@ -120,17 +119,19 @@ class LaCrosse(object):
         """Get current configuration info from 'v' command."""
         re_info = re.compile(r'\[.*\]')
 
-        self._write_cmd('v')
         while True:
-            line = self._serial.readline()
-            try:
-                line = line.encode().decode('utf-8')
-            except AttributeError:
-                line = line.decode('utf-8')
+            self._write_cmd('v')
 
-            match = re_info.match(line)
-            if match:
-                return self._parse_info(line)
+            for x in range(10):
+                line = self._socket.recv(1024)            
+                try:
+                    line = line.encode().decode('utf-8').strip('\r\n')
+                except AttributeError:
+                    line = line.decode('utf-8').strip('\r\n')
+
+                match = re_info.match(line)
+                if match:
+                    return self._parse_info(line)
 
     def led_mode_state(self, state):
         """Set the LED mode.
@@ -187,12 +188,12 @@ class LaCrosse(object):
         """Background refreshing thread."""
 
         while not self._stopevent.isSet():
-            line = self._serial.readline()
+            line = self._socket.recv(1024)
             #this is for python2/python3 compatibility. Is there a better way?
             try:
-                line = line.encode().decode('utf-8')
+                line = line.encode().decode('utf-8').strip('\r\n')
             except AttributeError:
-                line = line.decode('utf-8')
+                line = line.decode('utf-8').strip('\r\n')
 
             if LaCrosseSensor.re_reading.match(line):
                 sensor = LaCrosseSensor(line)
@@ -220,7 +221,8 @@ class LaCrosse(object):
 class LaCrosseSensor(object):
     """The LaCrosse Sensor class."""
     # OK 9 248 1 4 150 106
-    re_reading = re.compile(r'OK (\d+) (\d+) (\d+) (\d+) (\d+) (\d+)')
+    # OK 22 121 49 3 222 240 0 1 82 87 121 0 4 148 225 0 0 38 229 1 0 [79 31 F0 00 00 00 57 79 00 00 00 00 6D A7 08 00 00 26 E5 00 08 40 09 A9 00 9D 40 0C 7D 3D E0 00 00 00 04 15 20 10 02 EF 17]
+    re_reading = re.compile(r'OK (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+)')
 
     def __init__(self, line=None):
         if line:
@@ -230,23 +232,15 @@ class LaCrosseSensor(object):
         match = self.re_reading.match(line)
         if match:
             data = [int(c) for c in match.group().split()[1:]]
-            self.sensorid = data[1]
-            self.sensortype = data[2] & 0x7f
-            self.new_battery = True if data[2] & 0x80 else False
-            self.temperature = float(data[3] * 256 + data[4] - 1000) / 10
-            self.humidity = data[5] & 0x7f
-            self.low_battery = True if data[5] & 0x80 else False
+            self.sensortype = data[0]
+            self.sensorid = ''.join(f'{i:02X}' for i in [data[1], data[2]]) # str([f'{i:02x}' for i in [data[1], data[2]]])
+            self.ontime = (data[3] * 16777216) + (data[4] * 65536) + (data[5] * 256) + data[6]
+            self.totaltime = (data[7] * 16777216) + (data[8] * 65536) + (data[9] * 256) + data[10]
+            self.energy = (data[11] * 16777216) + (data[12] * 65536) + (data[13] * 256) + data[14]
+            self.power = (data[15] * 256) + data[16]
+            self.maxpower = (data[17] * 256) + data[18]
+            self.resets = data[19]
 
     def __repr__(self):
-        return "id=%d t=%f h=%d nbat=%d" % \
-            (self.sensorid, self.temperature, self.humidity, self.new_battery)
-
-
-class SerialPortFactory(object):
-    def create_serial_port(self, port):
-        if port.startswith("rfc2217://"):
-            from serial.rfc2217 import Serial
-            return Serial()
-        else:
-            from serial import Serial
-            return Serial()
+        return "id=%s pw=%d" % \
+            (self.sensorid, self.power)

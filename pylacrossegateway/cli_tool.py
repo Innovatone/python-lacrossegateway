@@ -21,15 +21,14 @@ import logging
 import os
 import time
 try:
-    from ConfigParser import (SafeConfigParser, NoOptionError)
+    from ConfigParser import (ConfigParser, NoOptionError)
 except ImportError:
-    from configparser import (SafeConfigParser, NoOptionError)
+    from configparser import (ConfigParser, NoOptionError)
 
-import pylacrosse
+import pylacrossegateway
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_DEVICE = '/dev/ttyUSB0'
 def get_known_sensor_name(sensor_id, config):
     try:
         if str(sensor_id) in config.sections():
@@ -47,36 +46,36 @@ def scan_callback(sensor, config):
     print('%s name=%s' % (sensor, name))
 
 
-def configure(lacrosse, config, args):
+def configure(lacrossegateway, config, args):
     if args.frequency_rfm1:
-        lacrosse.set_frequency(args.frequency_rfm1, 1)
+        lacrossegateway.set_frequency(args.frequency_rfm1, 1)
     if args.frequency_rfm2:
-        lacrosse.set_frequency(args.frequency_rfm2, 2)
+        lacrossegateway.set_frequency(args.frequency_rfm2, 2)
 
     if args.datarate_rfm1:
-        lacrosse.set_datarate(args.datarate_rfm1, 1)
+        lacrossegateway.set_datarate(args.datarate_rfm1, 1)
     if args.datarate_rfm2:
-        lacrosse.set_datarate(args.datarate_rfm1, 2)
+        lacrossegateway.set_datarate(args.datarate_rfm1, 2)
 
     if args.toggle_mask_rfm1:
-        lacrosse.set_toggle_mask(args.toggle_mask_rfm1, 1)
+        lacrossegateway.set_toggle_mask(args.toggle_mask_rfm1, 1)
     if args.toggle_mask_rfm2:
-        lacrosse.set_toggle_mask(args.toggle_mask_rfm2, 2)
+        lacrossegateway.set_toggle_mask(args.toggle_mask_rfm2, 2)
 
     if args.toggle_interval_rfm1:
-        lacrosse.set_toggle_interval(args.toggle_interval_rfm1, 1)
+        lacrossegateway.set_toggle_interval(args.toggle_interval_rfm1, 1)
     if args.toggle_interval_rfm2:
-        lacrosse.set_toggle_interval(args.toggle_interval_rfm1, 2)
+        lacrossegateway.set_toggle_interval(args.toggle_interval_rfm1, 2)
 
 
-def scan(lacrosse, config, args):
-    lacrosse.register_all(scan_callback, user_data=config)
-    lacrosse.start_scan()
+def scan(lacrossegateway, config, args):
+    lacrossegateway.register_all(scan_callback, user_data=config)
+    lacrossegateway.start_scan()
     while True:
         time.sleep(1)
 
-def get_info(lacrosse, config, args):
-    info = lacrosse.get_info()
+def get_info(lacrossegateway, config, args):
+    info = lacrossegateway.get_info()
     print('name:     {}'.format(info['name']))
     print('version:  {}'.format(info['version']))
     if 'rfm1name' in info:
@@ -86,19 +85,20 @@ def get_info(lacrosse, config, args):
         print('rfm1toggleinterval: {}'.format(info['rfm1toggleinterval']))
         print('rfm1togglemask: {}'.format(info['rfm1togglemask']))
 
-def led(lacrosse, config, args):
+def led(lacrossegateway, config, args):
     state = args.led_state.lower() == 'on'
-    lacrosse.led_config(state)
+    lacrossegateway.led_config(state)
 
 def main(args=None):
     parser = argparse.ArgumentParser('LaCrosse sensor CLI tool.', formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('-v', action='store_true', dest='verbose',
-            help='be more verbose')
-    parser.add_argument('-d', '--device', type=str, dest='device',
-            help='set local device e.g. \'{0}\' or\n'
-                 'set remote device e.g. \'rfc2217://[IP]:[PORT]\'\n'
-                 'default: \'{0}\''.format(DEFAULT_DEVICE),
-            default=DEFAULT_DEVICE)
+        help='be more verbose')
+    parser.add_argument('-H', '--host', type=str, dest='host',
+        help='set host name e.g. \'lacrossegateway.domain.com\' or\n'
+            'set ip address \'192.186.100.50\'\n'
+            'set remote device e.g. \'http://[IP]:[PORT]\'\n')
+    parser.add_argument('-p', '--port', type=int, dest='port',
+            help='set the port number')
     parser.add_argument('-f', type=str, dest='frequency_rfm1',
             help='set the frequency for RFM1')
     parser.add_argument('-F', type=str, dest='frequency_rfm2',
@@ -140,22 +140,27 @@ def main(args=None):
         _LOGGER.setLevel(logging.DEBUG)
 
     try:
-        config = SafeConfigParser()
+        config = ConfigParser()
         config.readfp(codecs.open(os.path.expanduser(
-                '~/.lacrosse/known_sensors.ini'), 'r', 'UTF-8'))
+                '~/.lacrossegateway/known_sensors.ini'), 'r', 'UTF-8'))
     except IOError:
         config = None
 
-    lacrosse = None
+    lacrossegateway = None
     try:
-        lacrosse = pylacrosse.LaCrosse(args.device, 57600)
-        lacrosse.open()
-        configure(lacrosse, config, args)
-        args.func(lacrosse, config, args)
+        lacrossegateway = pylacrossegateway.LaCrosseGateway(args.host, args.port)
+        lacrossegateway.connect()
+        configure(lacrossegateway, config, args)
+        try:
+            func = args.func
+        except AttributeError:
+            parser.error("too few arguments")
+
+        args.func(lacrossegateway, config, args)
 
     finally:
-        if lacrosse is not None:
-            lacrosse.close()
+        if lacrossegateway is not None:
+            lacrossegateway.close()
 
 if __name__ == '__main__':
     main()
